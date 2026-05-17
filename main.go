@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"io"
 	"log"
 
 	"os"
@@ -25,18 +26,28 @@ func main() {
 	status := run(ctx, cancel, *httpPort, *dataDir)
 	cancel()
 
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	defer stop()
+
+	<-ctx.Done()
+
 	os.Exit(status)
 }
 
 func run(ctx context.Context, cancel context.CancelFunc, httpPort int, dataDir string) int {
-	stdLogger := log.New(os.Stderr, "DEBUG: ", log.LstdFlags)
+	/*stdLogger := log.New(os.Stderr, "DEBUG: ", log.LstdFlags)
 	stdLogger.Printf("Linko is running on http://localhost:%d\n", httpPort)
 
 	f, err := os.OpenFile("linko.access.log", os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
 		// handle the error
 	}
-	accessLogger := log.New(f, "INFO: ", log.LstdFlags)
+	accessLogger := log.New(f, "INFO: ", log.LstdFlags)*/
+	logger := initializeLogger()
 
 	st, err := store.New(dataDir, stdLogger)
 	if err != nil {
@@ -63,4 +74,20 @@ func run(ctx context.Context, cancel context.CancelFunc, httpPort int, dataDir s
 	}
 	stdLogger.Printf("Linko is shutting down\n")
 	return 0
+}
+
+func initializeLogger() *log.Logger { //If a log file uri exists among environmental variables, write to that file in addition to stderr
+	logFile := os.Getenv("LINKO_LOG_FILE")
+	if logFile != "" {
+		file, err := os.OpenFile(logFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+		if err != nil {
+			log.Fatalf("failed to open log file: %v", err)
+		}
+		multiWriter := io.MultiWriter(os.Stderr, file)
+		logger := log.New(multiWriter, "INFO: ", log.LstdFlags)
+		return logger
+	} else {
+		logger := log.New(os.Stderr, "INFO: ", log.LstdFlags)
+		return logger
+	}
 }
