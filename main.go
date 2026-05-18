@@ -6,9 +6,9 @@ import (
 	"flag"
 	"fmt"
 	//"io"
-
+	"errors"
+	pkgerr "github.com/pkg/errors"
 	"log/slog"
-
 	"os"
 	"os/signal"
 	"syscall"
@@ -107,10 +107,12 @@ func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) { //If a 
 			return err
 		}
 		infoHandler := slog.NewJSONHandler(bufferedFile, &slog.HandlerOptions{
-			Level: slog.LevelInfo,
+			Level:       slog.LevelInfo,
+			ReplaceAttr: replaceAttr,
 		})
 		debugHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-			Level: slog.LevelDebug,
+			Level:       slog.LevelDebug,
+			ReplaceAttr: replaceAttr,
 		})
 		logger := slog.New(slog.NewMultiHandler(
 			debugHandler,
@@ -123,9 +125,34 @@ func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) { //If a 
 		return logger, closer, nil
 	} else {
 		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-			Level: slog.LevelDebug,
+			Level:       slog.LevelDebug,
+			ReplaceAttr: replaceAttr,
 		}))
 		closer := func() error { return nil }
 		return logger, closer, nil
 	}
+}
+
+type stackTracer interface {
+	error
+	StackTrace() pkgerr.StackTrace
+}
+
+func replaceAttr(groups []string, a slog.Attr) slog.Attr {
+	if a.Key == "error" {
+		err, ok := a.Value.Any().(error)
+		if !ok {
+			return a
+		}
+		if stackErr, ok := errors.AsType[stackTracer](err); ok {
+			return slog.GroupAttrs("error", slog.Attr{
+				Key:   "message",
+				Value: slog.StringValue(stackErr.Error()),
+			}, slog.Attr{
+				Key:   "stack_trace",
+				Value: slog.StringValue(fmt.Sprintf("%+v", stackErr.StackTrace())),
+			})
+		}
+	}
+	return a
 }

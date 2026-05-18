@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-
+	pkgerr "github.com/pkg/errors"
 	"golang.org/x/crypto/bcrypt"
 	"net/http"
 )
@@ -53,7 +53,7 @@ func (s *server) validatePassword(password, stored string) (bool, error) {
 	}
 	if err != nil {
 		//s.logger.Error("error validating password", "error", err)
-		return false, err
+		return false, pkgerr.WithStack(err)
 	}
 	return true, nil
 }
