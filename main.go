@@ -6,6 +6,9 @@ import (
 	"flag"
 	"fmt"
 	//"io"
+	"boot.dev/linko/internal/build"
+	"boot.dev/linko/internal/linkoerr"
+	"boot.dev/linko/internal/store"
 	"errors"
 	pkgerr "github.com/pkg/errors"
 	"log/slog"
@@ -13,8 +16,6 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
-	"boot.dev/linko/internal/store"
 )
 
 //var logger = log.New(os.Stderr, "DEBUG: ", log.LstdFlags)
@@ -95,7 +96,8 @@ func run(ctx context.Context, cancel context.CancelFunc, httpPort int, dataDir s
 type closeFunc func() error
 
 func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) { //If a log file uri exists among environmental variables, write to that file in addition to stderr
-
+	env := os.Getenv("ENV")
+	hostname, _ := os.Hostname()
 	if logFile != "" {
 		file, err := os.OpenFile(logFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 		if err != nil {
@@ -117,7 +119,12 @@ func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) { //If a 
 		logger := slog.New(slog.NewMultiHandler(
 			debugHandler,
 			infoHandler,
-		))
+		)).With(
+			slog.String("git_sha", build.GitSHA),
+			slog.String("build_time", build.BuildTime),
+			slog.String("env", env),
+			slog.String("hostname", hostname),
+		)
 
 		//multiWriter := io.MultiWriter(os.Stderr, bufferedFile)
 		//logger := slog.New(slog.NewTextHandler(multiWriter, nil))
@@ -127,7 +134,12 @@ func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) { //If a 
 		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 			Level:       slog.LevelDebug,
 			ReplaceAttr: replaceAttr,
-		}))
+		})).With(
+			slog.String("git_sha", build.GitSHA),
+			slog.String("build_time", build.BuildTime),
+			slog.String("env", env),
+			slog.String("hostname", hostname),
+		)
 		closer := func() error { return nil }
 		return logger, closer, nil
 	}
@@ -138,21 +150,40 @@ type stackTracer interface {
 	StackTrace() pkgerr.StackTrace
 }
 
+type multiError interface {
+	error
+	Unwrap() []error
+}
+
+func errorAttrs(err error) []slog.Attr {
+	attrs := []slog.Attr{
+		{Key: "message", Value: slog.StringValue(err.Error())},
+	}
+	attrs = append(attrs, linkoerr.Attrs(err)...)
+	if stackErr, ok := errors.AsType[stackTracer](err); ok {
+		attrs = append(attrs, slog.Attr{
+			Key:   "stack_trace",
+			Value: slog.StringValue(fmt.Sprintf("%+v", stackErr.StackTrace())),
+		})
+	}
+	return attrs
+}
+
 func replaceAttr(groups []string, a slog.Attr) slog.Attr {
 	if a.Key == "error" {
 		err, ok := a.Value.Any().(error)
 		if !ok {
 			return a
 		}
-		if stackErr, ok := errors.AsType[stackTracer](err); ok {
-			return slog.GroupAttrs("error", slog.Attr{
-				Key:   "message",
-				Value: slog.StringValue(stackErr.Error()),
-			}, slog.Attr{
-				Key:   "stack_trace",
-				Value: slog.StringValue(fmt.Sprintf("%+v", stackErr.StackTrace())),
-			})
+		if multiErr, ok := errors.AsType[multiError](err); ok {
+			var errAttrs []slog.Attr
+			for i, e := range multiErr.Unwrap() {
+				errAttrs = append(errAttrs, slog.GroupAttrs(fmt.Sprintf("error_%d", i+1), errorAttrs(e)...))
+			}
+			return slog.GroupAttrs("errors", errAttrs...)
 		}
+
+		return slog.GroupAttrs("error", errorAttrs(err)...)
 	}
 	return a
 }
