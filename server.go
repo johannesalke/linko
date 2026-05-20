@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
+
 	"time"
 
 	"boot.dev/linko/internal/store"
@@ -88,7 +90,7 @@ func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 			attrs := []any{
 				slog.String("method", r.Method),
 				slog.String("path", r.URL.Path),
-				slog.String("client_ip", r.RemoteAddr),
+				slog.String("client_ip", redactIP(r.RemoteAddr)),
 				slog.Duration("duration", time.Since(start)),
 				slog.Int("request_body_bytes", spyReader.bytesRead),
 				slog.Int("response_status", spyWriter.statusCode),
@@ -150,7 +152,12 @@ func httpError(ctx context.Context, w http.ResponseWriter, status int, err error
 	if logCtx, ok := ctx.Value(logContextKey).(*LogContext); ok {
 		logCtx.Error = err
 	}
-	http.Error(w, err.Error(), status)
+	err_msg := err.Error()
+	if status == 401 || status == 403 || status == 500 {
+		err_msg = http.StatusText(status)
+	}
+
+	http.Error(w, err_msg, status)
 }
 
 func requestIDMiddleware(next http.Handler) http.Handler {
@@ -163,4 +170,26 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Request-ID", id)
 		next.ServeHTTP(w, r)
 	})
+}
+
+func redactIP(addr string) string { //Doesn't look good, but much less reliant on type transmutation than the alternative
+
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	IPv4 := net.ParseIP(host).To4()
+	if IPv4 == nil {
+		return addr
+	}
+	segments := strings.Split(host, ".")
+	segments[3] = "x"
+
+	if err != nil || port == "" {
+
+		return string(IPv4)
+	}
+
+	return strings.Join(segments, ".")
+
 }

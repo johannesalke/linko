@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -103,16 +102,25 @@ func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) { //If a 
 	env := os.Getenv("ENV")
 	hostname, _ := os.Hostname()
 	if logFile != "" {
-		file, err := os.OpenFile(logFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+		/*file, err := os.OpenFile(logFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to open log file: %v", err)
 		}
-		bufferedFile := bufio.NewWriterSize(file, 8192)
+		bufferedFile := bufio.NewWriterSize(file, 8192)*/
+		lumberjackLogger := &lumberjack.Logger{
+			Filename:   logFile,
+			MaxSize:    1,
+			MaxAge:     28,
+			MaxBackups: 10,
+			LocalTime:  false,
+			Compress:   true,
+		}
 		closer := func() error {
-			err := bufferedFile.Flush()
+			err := lumberjackLogger.Close()
 			return err
 		}
-		infoHandler := slog.NewJSONHandler(bufferedFile, &slog.HandlerOptions{
+
+		infoHandler := slog.NewJSONHandler(lumberjackLogger, &slog.HandlerOptions{
 			Level:       slog.LevelInfo,
 			ReplaceAttr: replaceAttr,
 		})
