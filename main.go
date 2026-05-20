@@ -5,12 +5,16 @@ import (
 	"context"
 	"flag"
 	"fmt"
+
 	//"io"
 	"boot.dev/linko/internal/build"
 	"boot.dev/linko/internal/linkoerr"
 	"boot.dev/linko/internal/store"
 	"errors"
+	"github.com/lmittmann/tint"
+	"github.com/mattn/go-isatty"
 	pkgerr "github.com/pkg/errors"
+	"gopkg.in/natefinch/lumberjack.v2"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -112,10 +116,13 @@ func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) { //If a 
 			Level:       slog.LevelInfo,
 			ReplaceAttr: replaceAttr,
 		})
-		debugHandler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+
+		debugHandler := tint.NewHandler(os.Stderr, &tint.Options{
 			Level:       slog.LevelDebug,
 			ReplaceAttr: replaceAttr,
+			NoColor:     !(isatty.IsCygwinTerminal(os.Stdout.Fd()) || isatty.IsTerminal(os.Stdout.Fd())),
 		})
+
 		logger := slog.New(slog.NewMultiHandler(
 			debugHandler,
 			infoHandler,
@@ -131,9 +138,10 @@ func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) { //If a 
 		//logger := log.New(multiWriter, "", log.LstdFlags)
 		return logger, closer, nil
 	} else {
-		logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		logger := slog.New(tint.NewHandler(os.Stderr, &tint.Options{
 			Level:       slog.LevelDebug,
 			ReplaceAttr: replaceAttr,
+			NoColor:     !(isatty.IsCygwinTerminal(os.Stderr.Fd()) || isatty.IsTerminal(os.Stderr.Fd())),
 		})).With(
 			slog.String("git_sha", build.GitSHA),
 			slog.String("build_time", build.BuildTime),
